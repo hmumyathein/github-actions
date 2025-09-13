@@ -1,0 +1,73 @@
+name: Docker Meta Publish
+
+on:
+  workflow_call:
+    inputs:
+      amend_tags: 
+        required: true
+        type: string
+        description: Image tags to be linked in Docker manifest
+      aws_region:
+        required: false
+        type: string
+        description: AWS Region
+        default: "ap-southeast-1"
+      docker_meta_tags:
+        required: true
+        type: string
+        description: Tags argument to docker meta
+      ecr_registries:
+        required: true
+        type: string
+        description: AWS account IDs included with ECR login (comma separated)
+      ecr_uri:
+        required: true
+        type: string
+        description: ECR URI to push image to
+      role_to_assume:
+        required: true
+        type: string
+        description: ARN of the role that is authorized to publish the image
+      buildx_image_uri:
+        required: false
+        type: string
+        description: Optionally override buildx image
+        default: "moby/buildkit:master"
+
+jobs:
+  docker-meta-publish:
+    runs-on: ubuntu-latest
+    outputs:
+      tags: ${{ steps.meta.outputs.tags }}
+    steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v5
+      with:
+        role-to-assume: ${{ inputs.role_to_assume }}
+        aws-region: ${{ inputs.aws_region }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+      with:
+        mask-password: "true"
+        registries: ${{ inputs.ecr_registries }}
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      with:
+        driver-opts: |
+          image=${{ inputs.buildx_image_uri }}
+
+    - name: Docker Meta
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ inputs.ecr_uri }}
+        tags: ${{ inputs.docker_meta_tags }}
+
+    - name: Create manifest and Push
+      shell: bash
+      run: |
+        docker manifest create ${{ steps.meta.outputs.tags }} --amend ${{ inputs.amend_tags }}
+        docker manifest push ${{ steps.meta.outputs.tags }}
