@@ -1,0 +1,105 @@
+name: ECR Tag Validation
+
+description: Validates that specific tags exist in ECR repositories
+
+inputs:
+  aws_region:
+    required: false
+    description: AWS Region
+    default: ap-southeast-1
+  registry:
+    required: true
+    description: AWS account ID used for ECR login
+  repo_name:
+    required: true
+    description: Short name of the ECR repository
+  image_tag:
+    required: false
+    description: The image/artifact tag that is to be validated
+  image_tags:
+    required: false
+    description: The image/artifact tags to be validated, space separated
+  role_to_assume:
+    required: true
+    description: AWS IAM role to assume to perform ECR query
+
+outputs:
+  tags_found:
+    description: Comma-separated list of tags that were found
+    value: ${{ steps.validate.outputs.tags_found }}
+  tags_missing:
+    description: Comma-separated list of tags that were missing
+    value: ${{ steps.validate.outputs.tags_missing }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v5
+      with:
+        role-to-assume: ${{ inputs.role_to_assume }}
+        aws-region: ${{ inputs.aws_region }}
+
+    - name: Login to Amazon ECR
+      uses: aws-actions/amazon-ecr-login@v2
+      with:
+        mask-password: "true"
+        registries: ${{ inputs.registry }}
+
+    - name: Validate ECR Tags
+      id: validate
+      shell: bash
+      run: |
+        # Determine which tags to validate
+        if [ -n "${{ inputs.image_tag }}" ] && [ -n "${{ inputs.image_tags }}" ]; then
+          echo "Error: Both image_tag and image_tags cannot be specified at the same time"
+          exit 1
+        fi
+        
+        if [ -n "${{ inputs.image_tag }}" ]; then
+          TAGS_TO_VALIDATE="${{ inputs.image_tag }}"
+        elif [ -n "${{ inputs.image_tags }}" ]; then
+          TAGS_TO_VALIDATE="${{ inputs.image_tags }}"
+        else
+          echo "Error: Either image_tag or image_tags must be specified"
+          exit 1
+        fi
+        
+        # Initialize arrays for found and missing tags
+        FOUND_TAGS=()
+        MISSING_TAGS=()
+        
+        # Get list of existing tags from ECR
+        EXISTING_TAGS=$(aws ecr describe-images --repository-name ${{ inputs.repo_name }} --query 'imageDetails[].imageTags[]' --output text 2>/dev/null || echo "")
+        
+        # Check each tag
+        for tag in $TAGS_TO_VALIDATE; do
+          if echo "$EXISTING_TAGS" | grep -q "^$tag$"; then
+            FOUND_TAGS+=("$tag")
+            echo "✓ Tag '$tag' found in ECR repository ${{ inputs.repo_name }}"
+          else
+            MISSING_TAGS+=("$tag")
+            echo "✗ Tag '$tag' not found in ECR repository ${{ inputs.repo_name }}"
+          fi
+        done
+        
+        # Set outputs
+        if [ ${#FOUND_TAGS[@]} -gt 0 ]; then
+          echo "tags_found=$(IFS=','; echo "${FOUND_TAGS[*]}")" >> $GITHUB_OUTPUT
+        else
+          echo "tags_found=" >> $GITHUB_OUTPUT
+        fi
+        
+        if [ ${#MISSING_TAGS[@]} -gt 0 ]; then
+          echo "tags_missing=$(IFS=','; echo "${MISSING_TAGS[*]}")" >> $GITHUB_OUTPUT
+        else
+          echo "tags_missing=" >> $GITHUB_OUTPUT
+        fi
+        
+        # Exit with error if any tags are missing
+        if [ ${#MISSING_TAGS[@]} -gt 0 ]; then
+          echo "Validation failed: ${#MISSING_TAGS[@]} tag(s) not found"
+          exit 1
+        else
+          echo "Validation successful: All tags found"
+        fi

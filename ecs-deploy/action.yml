@@ -1,0 +1,111 @@
+name: ECS Deploy
+
+description: Registers an Amazon ECS task definition and deploys it to an ECS service
+
+inputs:
+  aws_region:
+    required: false
+    description: AWS Region
+    default: ap-southeast-1
+  cluster_name:
+    required: true
+    description: ECS cluster name that service runs in
+  service_name:
+    required: true
+    description: ECS service name to run the image
+  container_name:
+    required: true
+    description: Container name for deploying image
+  image_uri:
+    required: true
+    description: Full image URI
+  role_to_assume:
+    required: true
+    description: AWS IAM role to assume to perform ECS deployment
+  taskdef_path:
+    required: false
+    description: Relative path to the ECS task definition
+  taskdef_arn:
+    required: false
+    description: ARN of the ECS task definition
+  taskdef_family:
+    required: false
+    description: Family name of the ECS task definition
+  environment-variables:
+    required: false
+    description: Variables to add to the container (KEY=value format)
+  wait_for_service_stability:
+    required: false
+    description: Whether to wait for ECS deployment to complete
+    default: "true"
+  inspect_taskdef_post_render:
+    required: false
+    description: Prints out the task definition to stdout
+    default: "false"
+  codedeploy-application:
+    required: false
+    description: AWS CodeDeploy application name
+  codedeploy-deployment-group:
+    required: false
+    description: AWS CodeDeploy deployment group name
+  codedeploy-appspec:
+    required: false
+    description: Path to the AWS CodeDeploy AppSpec file
+
+outputs:
+  task-definition:
+    description: The rendered task definition
+    value: ${{ steps.task-def.outputs.task-definition }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v5
+      with:
+        role-to-assume: ${{ inputs.role_to_assume }}
+        aws-region: ${{ inputs.aws_region }}
+
+    - name: Checkout
+      uses: actions/checkout@v5
+
+    - name: Download task definition
+      if: ${{ inputs.taskdef_arn != '' }}
+      shell: bash
+      run: |
+        aws ecs describe-task-definition --task-definition ${{ inputs.taskdef_arn }} --query taskDefinition > task-definition.json
+
+    - name: Fill in the new image ID in the Amazon ECS task definition
+      id: task-def
+      uses: aws-actions/amazon-ecs-render-task-definition@v1
+      with:
+        task-definition: ${{ inputs.taskdef_path }}
+        container-name: ${{ inputs.container_name }}
+        image: ${{ inputs.image_uri }}
+        environment-variables: ${{ inputs.environment-variables }}
+
+    - name: Inspect task definition
+      if: ${{ inputs.inspect_taskdef_post_render == 'true' }}
+      shell: bash
+      run: |
+        cat ${{ steps.task-def.outputs.task-definition }}
+
+    - name: Deploy Amazon ECS task definition
+      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+      with:
+        task-definition: ${{ steps.task-def.outputs.task-definition }}
+        service: ${{ inputs.service_name }}
+        cluster: ${{ inputs.cluster_name }}
+        wait-for-service-stability: ${{ inputs.wait_for_service_stability }}
+
+    - name: Deploy with CodeDeploy
+      if: ${{ inputs.codedeploy-application != '' && inputs.codedeploy-deployment-group != '' }}
+      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+      with:
+        task-definition: ${{ steps.task-def.outputs.task-definition }}
+        service: ${{ inputs.service_name }}
+        cluster: ${{ inputs.cluster_name }}
+        wait-for-service-stability: ${{ inputs.wait_for_service_stability }}
+        codedeploy-application: ${{ inputs.codedeploy-application }}
+        codedeploy-deployment-group: ${{ inputs.codedeploy-deployment-group }}
+        codedeploy-appspec: ${{ inputs.codedeploy-appspec }}
