@@ -73,7 +73,7 @@ runs:
   using: "composite"
   steps:
     - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v5
+      uses: aws-actions/configure-aws-credentials@v6
       with:
         role-to-assume: ${{ inputs.role_to_assume }}
         aws-region: ${{ inputs.aws_region }}
@@ -86,30 +86,30 @@ runs:
 
     - name: Checkout
       if: ${{ inputs.include_checkout == 'true' }}
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
 
     - name: Set up QEMU
       if: ${{ inputs.emulation_required == 'true' }}
-      uses: docker/setup-qemu-action@v3
+      uses: docker/setup-qemu-action@v4
       with:
         image: ${{ inputs.qemu_image_uri }}
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      uses: docker/setup-buildx-action@v4
       with:
         driver-opts: |
           image=${{ inputs.buildx_image_uri }}
 
     - name: Docker Meta
       id: meta
-      uses: docker/metadata-action@v5
+      uses: docker/metadata-action@v6
       with:
         images: ${{ inputs.ecr_uri }}
         tags: ${{ inputs.docker_meta_tags }}
 
     - name: Docker build and push
       id: publish
-      uses: docker/build-push-action@v6
+      uses: docker/build-push-action@v7
       with:
         context: ${{ inputs.docker_build_context }}
         build-args: ${{ inputs.docker_build_args }}
